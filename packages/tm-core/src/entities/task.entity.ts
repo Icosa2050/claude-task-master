@@ -35,20 +35,28 @@ export class TaskEntity implements Task {
 	complexity?: Task['complexity'];
 
 	constructor(data: Task | (Omit<Task, 'id'> & { id: number | string })) {
-		this.validate(data);
+		const normalizedPriority = this.normalizePriority(data.priority);
+		const normalizedData = {
+			...data,
+			priority: normalizedPriority
+		} as Task;
+
+		this.validate(normalizedData);
 
 		// Always convert ID to string
-		this.id = String(data.id);
-		this.title = data.title;
-		this.description = data.description;
-		this.status = data.status;
-		this.priority = data.priority;
+		this.id = String(normalizedData.id);
+		this.title = normalizedData.title;
+		this.description = normalizedData.description;
+		this.status = normalizedData.status;
+		this.priority = normalizedPriority;
 		// Ensure dependency IDs are also strings
-		this.dependencies = (data.dependencies || []).map((dep) => String(dep));
-		this.details = data.details;
-		this.testStrategy = data.testStrategy;
+		this.dependencies = (normalizedData.dependencies || []).map((dep) =>
+			String(dep)
+		);
+		this.details = normalizedData.details;
+		this.testStrategy = normalizedData.testStrategy;
 		// Normalize subtask IDs to strings
-		this.subtasks = (data.subtasks || []).map((subtask) => ({
+		this.subtasks = (normalizedData.subtasks || []).map((subtask) => ({
 			...subtask,
 			id: Number(subtask.id), // Keep subtask IDs as numbers per interface
 			parentId: String(subtask.parentId)
@@ -130,6 +138,48 @@ export class TaskEntity implements Task {
 	 */
 	private isValidPriority(priority: any): priority is TaskPriority {
 		return ['low', 'medium', 'high', 'critical'].includes(priority);
+	}
+
+	/**
+	 * Normalize legacy priority formats (numeric / mixed-case) to valid enum values
+	 */
+	private normalizePriority(priority: any): TaskPriority {
+		const priorityMap: Record<string, TaskPriority> = {
+			low: 'low',
+			'1': 'low',
+			medium: 'medium',
+			'2': 'medium',
+			high: 'high',
+			'3': 'high',
+			critical: 'critical',
+			'4': 'critical'
+		};
+
+		if (priority === undefined || priority === null) {
+			return 'medium';
+		}
+
+		if (typeof priority === 'number') {
+			const mapped = priorityMap[String(priority)];
+			if (mapped) {
+				return mapped;
+			}
+		} else if (typeof priority === 'string') {
+			const normalized = priority.trim().toLowerCase();
+			const mapped = priorityMap[normalized];
+			if (mapped) {
+				return mapped;
+			}
+		}
+
+		if (this.isValidPriority(priority)) {
+			return priority;
+		}
+
+		throw new TaskMasterError(
+			`Invalid task priority: ${priority}`,
+			ERROR_CODES.VALIDATION_ERROR
+		);
 	}
 
 	/**
