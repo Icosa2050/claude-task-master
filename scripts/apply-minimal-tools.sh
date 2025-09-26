@@ -1,3 +1,9 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "$0")/.." && pwd)"
+
+cat <<'JSCONTENT' > "${repo_root}/mcp-server/src/tools/index.js"
 /**
  * tools/index.js
  * Export all Task Master CLI tools for MCP server
@@ -125,3 +131,10 @@ export function registerTaskMasterTools(server) {
 export default {
 	registerTaskMasterTools
 };
+JSCONTENT
+
+if ! git -C "${repo_root}" diff --quiet -- mcp-server/src/tools/index.js; then
+  printf 'Updated minimal tools in mcp-server/src/tools/index.js\n'
+else
+  printf 'Minimal tools already applied; no changes made.\n'
+fi
