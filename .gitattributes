@@ -1,0 +1,2 @@
+# Always prefer the upstream version of the npm lockfile during merges
+package-lock.json merge=keepTheirLockfile
