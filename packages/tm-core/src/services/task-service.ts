@@ -135,15 +135,23 @@ export class TaskService {
 	}
 
 	/**
-	 * Get a single task by ID - delegates to storage layer
+	 * Get a single task by ID (supports dotted subtask IDs like "5.1")
 	 */
 	async getTask(taskId: string, tag?: string): Promise<Task | null> {
-		// Use provided tag or get active tag
+		const stringId = String(taskId);
 		const activeTag = tag || this.getActiveTag();
 
 		try {
-			// Delegate to storage layer which handles the specific logic for tasks vs subtasks
-			return await this.storage.loadTask(String(taskId), activeTag);
+			const result = await this.getTaskList({
+				tag: activeTag,
+				includeSubtasks: true
+			});
+
+			if (stringId.includes('.')) {
+				return this.findSubtaskById(result.tasks, stringId);
+			}
+
+			return result.tasks.find((t) => t.id === stringId) || null;
 		} catch (error) {
 			throw new TaskMasterError(
 				`Failed to get task ${taskId}`,
@@ -151,12 +159,90 @@ export class TaskService {
 				{
 					operation: 'getTask',
 					resource: 'task',
-					taskId: String(taskId),
+					taskId: stringId,
 					tag: activeTag
 				},
 				error as Error
 			);
 		}
+	}
+
+	/**
+	 * Locate and normalize a subtask given a dotted ID (e.g. "5.1")
+	 */
+	private findSubtaskById(tasks: Task[], compositeId: string): Task | null {
+		const [parentId, subtaskId] = compositeId.split('.');
+
+		if (!parentId || !subtaskId) {
+			return null;
+		}
+
+		const parentTask = tasks.find((task) => task.id === parentId);
+		if (!parentTask || !parentTask.subtasks?.length) {
+			return null;
+		}
+
+		const subtask = parentTask.subtasks.find(
+			(st) => String(st.id) === subtaskId
+		);
+		if (!subtask) {
+			return null;
+		}
+
+		const parentSubtaskIds = new Set(
+			parentTask.subtasks?.map((st) => String(st.id)) ?? []
+		);
+		const taskIds = new Set(tasks.map((task) => String(task.id)));
+
+		const resolvedDependencies = (subtask.dependencies ?? []).map((dep) => {
+			const depId = String(dep);
+
+			if (depId.includes('.')) {
+				return depId;
+			}
+
+			if (taskIds.has(depId)) {
+				return depId;
+			}
+
+			if (parentSubtaskIds.has(depId)) {
+				return `${parentTask.id}.${depId}`;
+			}
+
+			return depId;
+		});
+
+		const normalizedSubtask: Task = {
+			id: `${parentTask.id}.${String(subtask.id)}`,
+			title: subtask.title || `Subtask ${subtaskId}`,
+			description: subtask.description || '',
+			status: subtask.status || 'pending',
+			priority: subtask.priority || parentTask.priority || 'medium',
+			dependencies: resolvedDependencies,
+			details: subtask.details || '',
+			testStrategy: subtask.testStrategy || '',
+			subtasks: [],
+			createdAt: subtask.createdAt ?? parentTask.createdAt,
+			updatedAt: subtask.updatedAt ?? parentTask.updatedAt,
+			effort: subtask.effort,
+			actualEffort: subtask.actualEffort,
+			tags: parentTask.tags,
+			assignee: subtask.assignee ?? parentTask.assignee,
+			complexity: subtask.complexity ?? parentTask.complexity
+		};
+
+		const enrichedSubtask = normalizedSubtask as Task & {
+			isSubtask: true;
+			parentTask: { id: string; title: string; status: TaskStatus };
+		};
+		enrichedSubtask.isSubtask = true;
+		enrichedSubtask.parentTask = {
+			id: parentTask.id,
+			title: parentTask.title,
+			status: parentTask.status
+		};
+
+		return enrichedSubtask;
 	}
 
 	/**
